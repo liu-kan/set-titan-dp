@@ -1,0 +1,60 @@
+#!/bin/bash
+# cool_gpu       This script will enable or disable fixed gpu fan speed 
+#
+# chkconfig: 345 95 5
+# description:  A script hack for GPU fan control on headless GPU nodes
+#
+
+# Copyright (c)2011, Axel Kohlmeyer <akohlmey@gmail.com>
+
+# locations of all the magic
+dir=/home/liuk/opt/set-gpu-fans
+smi=/usr/bin/nvidia-smi
+set=/usr/bin/nvidia-settings
+
+# if we have a previous GPU logger, terminate it
+nvlpid=`pgrep -P 1 nvidia-smi`
+if [ "x${nvlpid}" != "x" ]
+then
+    kill -TERM ${nvlpid}
+fi
+
+# determine major driver version
+ver=`awk '/NVIDIA/ {print $8}' /proc/driver/nvidia/version | cut -d . -f 1`
+
+# drivers from 285.x.y on allow persistence mode setting
+# so we should not need the logger hack anymore
+
+# for multiple tesla devices, only one display is supported.
+# thus we need to launch the X server once for each display
+# making each of the PCI IDs the primary device in turn.
+
+# command to set fan speed on primary GPU.
+#nvscmd="${set} -a [gpu:0]/GPUFanControlState=1 -a [fan:0]/GPUCurrentFanSpeed=85"
+nvscmd="${set} -a [gpu:1]/GPUDoublePrecisionBoostImmediate=1"
+
+# get PCI bus ids of Nvidia cards and convert from hexadecimal to decimal. watch out for the falling toothpicks.
+pciid=`lspci  | sed -n -e '/VGA compatib.*NVIDIA/s/^\(..\):\(..\).\(.\).*/printf "PCI:%d:%d:%d\\\\\\\\n" 0x\1 0x\2 0x\3;/p'`
+
+for s in `eval ${pciid}`
+do \
+    cfg=`mktemp /tmp/xorg-XXXXXXXX.conf`
+    sed -e s,@GPU_BUS_ID@,${s},    \
+        -e s,@SET_GPU_DIR@,${dir}, \
+        ${dir}/xorg.conf >> ${cfg}
+    xinit ${nvscmd} --  :0 -once -config ${cfg}
+    echo "${nvscmd}"
+
+    rm -f ${cfg}
+done
+
+# no need to keep the logger around
+if [ "x$1" == "xstop" ]
+then
+    nvlpid=`pgrep -P 1 nvidia-smi`
+    if [ "x${nvlpid}" != "x" ]
+    then
+        kill -TERM ${nvlpid}
+    fi
+fi
+
